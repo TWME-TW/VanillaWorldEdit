@@ -1,6 +1,10 @@
 package dev.twme.vanillaworldedit.helper;
 
+import com.sk89q.worldedit.WorldEdit;
 import com.sk89q.worldedit.bukkit.BukkitAdapter;
+import com.sk89q.worldedit.extension.factory.PatternFactory;
+import com.sk89q.worldedit.extension.input.ParserContext;
+import com.sk89q.worldedit.function.pattern.Pattern;
 import com.sk89q.worldedit.math.BlockVector3;
 import org.bukkit.World;
 import org.bukkit.block.Block;
