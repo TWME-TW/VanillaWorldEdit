@@ -1,0 +1,10 @@
+# Maximum accepted cuboid volume. FAWE permissions and limits still apply.
+max-volume: 16777216
+
+destroy:
+  # fawe: lowest load, but intentionally does not create natural block drops.
+  # throttled: preserves breakNaturally drops while spreading work over ticks.
+  mode: throttled
+  blocks-per-tick: 128
+  max-millis-per-tick: 4
+  max-queued-jobs: 8
