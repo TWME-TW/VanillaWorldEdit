@@ -2,7 +2,7 @@ name: VanillaWorldEdit
 version: '${project.version}'
 main: dev.twme.vanillaworldedit.VanillaWorldEdit
 api-version: '1.13'
+depend: [FastAsyncWorldEdit]
 authors:
   - The_Dumbledodo
   - TWME-TW
-

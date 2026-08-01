@@ -1,71 +1,102 @@
 package dev.twme.vanillaworldedit.adapter;
 
-import dev.twme.vanillaworldedit.VanillaWorldEdit;
-import dev.twme.vanillaworldedit.helper.BlockDataHelper;
-import dev.twme.vanillaworldedit.helper.Position;
-import dev.twme.vanillaworldedit.helper.WorldHelper;
+import com.sk89q.worldedit.math.BlockVector3;
+import com.sk89q.worldedit.bukkit.BukkitAdapter;
+import dev.twme.vanillaworldedit.command.EditMode;
+import dev.twme.vanillaworldedit.command.EditRequest;
+import dev.twme.vanillaworldedit.command.VanillaCommandParser;
+import dev.twme.vanillaworldedit.config.PluginSettings;
+import dev.twme.vanillaworldedit.service.DestroyQueue;
+import dev.twme.vanillaworldedit.service.WorldEditExecutor;
+import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 
-public class BukkitListener implements Listener {
-    @EventHandler(priority = EventPriority.LOW)
+import java.util.Locale;
+
+public final class BukkitListener implements Listener {
+
+    private final PluginSettings settings;
+    private final WorldEditExecutor worldEditExecutor;
+    private final DestroyQueue destroyQueue;
+
+    public BukkitListener(
+            PluginSettings settings,
+            WorldEditExecutor worldEditExecutor,
+            DestroyQueue destroyQueue
+    ) {
+        this.settings = settings;
+        this.worldEditExecutor = worldEditExecutor;
+        this.destroyQueue = destroyQueue;
+    }
+
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onPlayerCommandPreprocess(PlayerCommandPreprocessEvent event) {
-        String message = event.getMessage().toLowerCase();
-        if (!message.startsWith("/")) return;
+        String commandName = firstToken(event.getMessage()).toLowerCase(Locale.ROOT);
+        if (!isHandled(commandName)) {
+            return;
+        }
 
-        var arg = message.split(" ");
-        var command = arg[0];
-        var server = VanillaWorldEdit.getInstance().getServer();
-        var player = event.getPlayer();
+        Player player = event.getPlayer();
+        String permission = commandName.endsWith("fill") ? "minecraft.command.fill" : "minecraft.command.setblock";
+        if (!player.hasPermission(permission)) {
+            return;
+        }
 
-        if (command.equals("/fill")) {
-            event.setCancelled(true);
+        event.setCancelled(true);
+        try {
+            BlockVector3 origin = BlockVector3.at(
+                    player.getLocation().getBlockX(),
+                    player.getLocation().getBlockY(),
+                    player.getLocation().getBlockZ()
+            );
+            EditRequest request = VanillaCommandParser.parse(event.getMessage(), origin);
+            validateWorldHeight(player, request);
+            validateFawePermissions(player, request);
 
-            var blockVector = player.getLocation().toVector().toBlockVector();
-            var v1 = BlockDataHelper.parseCoordinateString(arg[1] + " " + arg[2] + " " + arg[3], blockVector);
-            var v2 = BlockDataHelper.parseCoordinateString(arg[4] + " " + arg[5] + " " + arg[6], blockVector);
-
-            WorldHelper.selectPositions(player, v1, Position.PRIMARY);
-            WorldHelper.selectPositions(player, v2, Position.SECONDARY);
-
-            var blockData = BlockDataHelper.convertBlockData(arg[7]);
-            switch (arg.length >= 9 ? arg[8] : "none") {
-                case "destroy" -> {
-                    WorldHelper.getBlocksBetween(player.getWorld(), v1, v2).forEach(block -> block.breakNaturally(true, true));
-                    server.dispatchCommand(player, "/set %s".formatted(blockData));
-                }
-                case "hollow" -> {
-                    server.dispatchCommand(player, "/set air");
-                    server.dispatchCommand(player, "/outline %s".formatted(blockData));
-                }
-                case "keep" -> server.dispatchCommand(player, "/replace air %s".formatted(blockData));
-                case "outline" -> server.dispatchCommand(player, "/outline %s".formatted(blockData));
-                case "replace" -> {
-                    var commandMessage = arg.length >= 10 ? "/replace %s %s".formatted(BlockDataHelper.convertBlockData(arg[9]), blockData) : "/replace %s".formatted(blockData);
-                    server.dispatchCommand(player, commandMessage);
-                }
-                default -> server.dispatchCommand(player, "/set %s".formatted(blockData));
+            if (request.mode() == EditMode.DESTROY && settings.destroy().mode() == PluginSettings.DestroyMode.THROTTLED) {
+                destroyQueue.submit(player, request);
+            } else {
+                worldEditExecutor.execute(player, request);
             }
-        } else if (command.equals("/setblock")) {
-            event.setCancelled(true);
+        } catch (IllegalArgumentException exception) {
+            player.sendMessage("VanillaWorldEdit: " + exception.getMessage());
+        } catch (Exception exception) {
+            player.sendMessage("VanillaWorldEdit: edit failed; see the server log.");
+            player.getServer().getLogger().warning("VanillaWorldEdit edit failed for " + player.getName() + ": " + exception);
+        }
+    }
 
-            var blockVector = player.getLocation().toVector().toBlockVector();
-            var coordinate = BlockDataHelper.parseCoordinateString(arg[1] + " " + arg[2] + " " + arg[3], blockVector);
-            var blockData = BlockDataHelper.convertBlockData(arg[4]);
+    private static String firstToken(String message) {
+        int space = message.indexOf(' ');
+        return space < 0 ? message : message.substring(0, space);
+    }
 
-            WorldHelper.selectPositions(player, coordinate, Position.PRIMARY);
-            WorldHelper.selectPositions(player, coordinate, Position.SECONDARY);
+    private static boolean isHandled(String command) {
+        return command.equals("/fill") || command.equals("/minecraft:fill")
+                || command.equals("/setblock") || command.equals("/minecraft:setblock");
+    }
 
-            switch (arg.length >= 6 ? arg[5] : "none") {
-                case "destroy" -> {
-                    player.getWorld().getBlockAt(coordinate.getBlockX(), coordinate.getBlockY(), coordinate.getBlockZ()).breakNaturally(true, true);
-                    server.dispatchCommand(player, "/set %s".formatted(blockData));
-                }
-                case "keep" -> server.dispatchCommand(player, "/replace air %s".formatted(blockData));
-                case "replace" -> server.dispatchCommand(player, "/replace %s".formatted(blockData));
-                default -> server.dispatchCommand(player, "/set %s".formatted(blockData));
+    private static void validateWorldHeight(Player player, EditRequest request) {
+        var world = BukkitAdapter.adapt(player.getWorld());
+        if (request.min().y() < world.getMinY()
+                || request.max().y() > world.getMaxY()) {
+            throw new IllegalArgumentException("selection is outside the world's build height");
+        }
+    }
+
+    private static void validateFawePermissions(Player player, EditRequest request) {
+        String[] permissions = switch (request.mode()) {
+            case SET, DESTROY -> new String[]{"worldedit.region.set"};
+            case KEEP, REPLACE -> new String[]{"worldedit.region.replace"};
+            case OUTLINE -> new String[]{"worldedit.region.faces"};
+            case HOLLOW -> new String[]{"worldedit.region.set", "worldedit.region.faces"};
+        };
+        for (String permission : permissions) {
+            if (!player.hasPermission(permission)) {
+                throw new IllegalArgumentException("missing permission: " + permission);
             }
         }
     }

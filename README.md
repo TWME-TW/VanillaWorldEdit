@@ -1,78 +1,38 @@
 # VanillaWorldEdit
 
-VanillaWorldEdit lets builders keep their existing muscle memory for `/fill` and `/setblock` while enjoying the speed and reliability of FastAsyncWorldEdit (FAWE). The plugin intercepts the vanilla commands, translates the arguments (including relative coordinates and modes such as `destroy`, `hollow`, `keep`, `outline`, and `replace`), and then replays them as FAWE selections and operations. This keeps your workflow vanilla-simple without sacrificing asynchronous WorldEdit performance.
-
-## Features
-
-- Converts `/fill` and `/setblock` invocations into the closest FAWE command sequence automatically.
-- Honors vanilla-style relative (`~`) coordinates, arithmetic in coordinate arguments, and fill/set modes.
-- Uses the player's FAWE selection so that undo/redo history and region visualizations continue to work as expected.
-- Breaks blocks naturally when `destroy` is specified and restricts replacements when `keep` or `replace` are used, matching vanilla semantics.
+VanillaWorldEdit lets builders use `/fill` and `/setblock` through FastAsyncWorldEdit (FAWE). It executes bulk edits through one FAWE edit session without changing the player's selection.
 
 ## Requirements
 
-- Paper/Purpur (or another Paper-compatible) server on 1.13+; developed against 1.21 builds.
-- FastAsyncWorldEdit installed on the server (Bukkit & Core components).
-- Java 21 runtime (matches the target specified in `pom.xml`).
-- Players must already have permission to execute `/fill` and `/setblock`; the plugin does not add tab completion or permission nodes.
+- Paper/Purpur (or another Paper-compatible server)
+- Java 21
+- FastAsyncWorldEdit 2.13.x
 
-## Installation
+## Behavior
 
-1. Download the compiled jar from the Releases page or build it yourself (see below).
-2. Drop the jar into your server's `plugins` directory alongside FAWE.
-3. Restart or reload the server to register the listener that hooks `PlayerCommandPreprocessEvent`.
+`/fill` supports the vanilla-style `destroy`, `hollow`, `keep`, `outline`, and `replace [filter]` modes.
+`/setblock` supports `destroy`, `keep`, and `replace`.
+Absolute, relative (`~`, `~-2.5`), and arithmetic coordinates (`~(2+3)`) are accepted.
 
-## Usage
+The default `destroy.mode: throttled` preserves natural drops while enforcing global per-tick block and time budgets. Set it to `fawe` for the lowest load; that mode intentionally does not create natural drops. Throttled destroys do not create FAWE undo history because every block is broken and replaced through Bukkit.
 
-### `/fill`
+## Configuration
 
-```text
-/fill <x1> <y1> <z1> <x2> <y2> <z2> <block> [mode]
+```yaml
+max-volume: 16777216
+destroy:
+  mode: throttled
+  blocks-per-tick: 128
+  max-millis-per-tick: 4
+  max-queued-jobs: 8
 ```
 
-The plugin converts the two corners into a FAWE region selection and dispatches bulk operations:
+FAWE's own region, history, memory, and block-change limits still apply. Players must have the corresponding `minecraft.command.fill` or `minecraft.command.setblock` permission and the relevant FAWE edit permissions.
 
-| Mode      | Performed FAWE actions |
-|-----------|------------------------|
-| (none)    | `/set <block>` |
-| `destroy` | Breaks blocks naturally, then `/set <block>` |
-| `hollow`  | `/set air` then `/outline <block>` |
-| `keep`    | `/replace air <block>` |
-| `outline` | `/outline <block>` |
-| `replace` | `/replace <filter> <block>` (only when a target block is provided) |
+## Build And Test
 
-All coordinates may use `~`, `~-5`, or even expressions such as `~(2+3)`; the helper converts them before calculating the FAWE selection.
-
-### `/setblock`
-
-```text
-/setblock <x> <y> <z> <block> [mode]
-```
-
-The plugin selects a single-block FAWE region before dispatching a FAWE command:
-
-| Mode      | Behavior |
-|-----------|----------|
-| (none)    | `/set <block>` |
-| `destroy` | Breaks the target block naturally, then `/set <block>` |
-| `keep`    | `/replace air <block>` |
-| `replace` | `/replace <block>` |
-
-### Notes & Limitations
-
-- No tab completion is provided; rely on the client-side vanilla helper or add your own command aliases if needed.
-- Only `/fill` and `/setblock` are intercepted—other vanilla structure commands (e.g., `/clone`) remain untouched.
-- Because FAWE executes the heavy lifting, ensure your FAWE configuration allows the commands you expect (e.g., `//set`, `//replace`).
-
-## Building from Source
-
-```powershell
+```bash
 mvn clean package
 ```
 
-The shaded artifact will be placed in `target/`. Copy it to your server when you need a custom build.
-
-## Credits
-
-- Original concept by The_Dumbledodo.
-- Maintained by TWME-TW. See `LICENSE` for redistribution details.
+The plugin JAR is written to `target/VanillaWorldEdit-1.0.0.jar`. Unit tests run as part of the build.
